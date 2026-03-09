@@ -43,6 +43,20 @@ impl SlidingBloomFilter {
         }
     }
 
+    /// Check if a message_id is probably seen (without adding it)
+    pub fn check(&self, message_id: &[u8; 32]) -> bool {
+        self.current.check(message_id) || self.previous.check(message_id)
+    }
+
+    /// Add a message_id to the filter (without checking first)
+    pub fn add(&mut self, message_id: &[u8; 32]) {
+        if !self.check(message_id) {
+            self.rotate_if_full();
+            self.current.set(message_id);
+            self.insert_count += 1;
+        }
+    }
+
     pub fn check_and_add(&mut self, message_id: &[u8; 32]) -> bool {
         if self.current.check(message_id) || self.previous.check(message_id) {
             true
