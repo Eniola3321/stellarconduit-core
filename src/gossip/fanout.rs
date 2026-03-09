@@ -110,14 +110,24 @@ mod tests {
 
     #[test]
     fn random_selection_returns_empty_for_zero_or_empty_input() {
-        let peers = vec![PeerIdentity::new(1), PeerIdentity::new(2)];
+        let mut k1 = [0u8; 32];
+        k1[0] = 1;
+        let mut k2 = [0u8; 32];
+        k2[0] = 2;
+        let peers = vec![PeerIdentity::new(k1), PeerIdentity::new(k2)];
         assert!(select_random_peers(&peers, 0).is_empty());
         assert!(select_random_peers(&[], 3).is_empty());
     }
 
     #[test]
     fn random_selection_is_unique_and_bounded() {
-        let peers: Vec<PeerIdentity> = (0..10).map(PeerIdentity::new).collect();
+        let peers: Vec<PeerIdentity> = (0..10)
+            .map(|i| {
+                let mut key = [0u8; 32];
+                key[0] = i as u8;
+                PeerIdentity::new(key)
+            })
+            .collect();
 
         let selected = select_random_peers(&peers, 6);
         assert_eq!(selected.len(), 6);
@@ -132,7 +142,13 @@ mod tests {
 
     #[test]
     fn random_selection_with_f_above_peer_count_returns_all_unique_peers() {
-        let peers: Vec<PeerIdentity> = (0..5).map(PeerIdentity::new).collect();
+        let peers: Vec<PeerIdentity> = (0..5)
+            .map(|i| {
+                let mut key = [0u8; 32];
+                key[0] = i as u8;
+                PeerIdentity::new(key)
+            })
+            .collect();
         let selected = select_random_peers(&peers, 99);
 
         assert_eq!(selected.len(), peers.len());
