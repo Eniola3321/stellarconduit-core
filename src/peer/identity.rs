@@ -1,7 +1,7 @@
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use std::fmt;
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
 pub struct PeerIdentity {
     /// Ed25519 public key bytes
     pub pubkey: [u8; 32],
