@@ -50,30 +50,31 @@ impl MdnsAdvertiser {
         is_relay: bool,
     ) -> Result<Self, DiscoveryError> {
         // Create the mDNS service daemon
-        let daemon = mdns_sd::ServiceDaemon::new()
-            .map_err(|e| DiscoveryError::MdnsError(format!("Failed to create service daemon: {}", e)))?;
+        let daemon = mdns_sd::ServiceDaemon::new().map_err(|e| {
+            DiscoveryError::MdnsError(format!("Failed to create service daemon: {}", e))
+        })?;
 
         // Build TXT records: pubkey=<hex>, is_relay=<0|1>
         let pubkey_hex = identity.display_id.clone();
         let is_relay_str = if is_relay { "1" } else { "0" };
-        
+
         // Create a unique service name (using the first 16 chars of the pubkey hex)
         let service_name = format!("StellarConduit-{}", &identity.display_id[..16]);
 
         // Build the service info - ServiceInfo::new takes 6 arguments:
         // service_type, instance_name, host_name, ip_addr, port, properties
         let host_name = format!("{}.local.", service_name);
-        
+
         // Create TXT properties - mdns-sd accepts HashMap<String, String> which implements IntoTxtProperties
         let mut txt_properties = HashMap::new();
         txt_properties.insert("pubkey".to_string(), pubkey_hex);
         txt_properties.insert("is_relay".to_string(), is_relay_str.to_string());
-        
+
         // Use localhost IP - mdns-sd will use this or auto-detect
         // &[IpAddr] implements AsIpAddrs
         let local_ip = std::net::IpAddr::V4(std::net::Ipv4Addr::new(127, 0, 0, 1));
         let local_ips: &[std::net::IpAddr] = &[local_ip];
-        
+
         let service_info = mdns_sd::ServiceInfo::new(
             MDNS_SERVICE_TYPE,
             &service_name,
@@ -82,12 +83,17 @@ impl MdnsAdvertiser {
             port,
             txt_properties,
         )
-        .map_err(|e| DiscoveryError::ServiceRegistrationError(format!("Failed to create service info: {}", e)))?;
+        .map_err(|e| {
+            DiscoveryError::ServiceRegistrationError(format!(
+                "Failed to create service info: {}",
+                e
+            ))
+        })?;
 
         // Register the service
-        daemon
-            .register(service_info)
-            .map_err(|e| DiscoveryError::ServiceRegistrationError(format!("Failed to register service: {}", e)))?;
+        daemon.register(service_info).map_err(|e| {
+            DiscoveryError::ServiceRegistrationError(format!("Failed to register service: {}", e))
+        })?;
 
         log::info!(
             "mDNS service registered: {} on port {} (pubkey: {}, is_relay: {})",
@@ -127,6 +133,7 @@ impl MdnsAdvertiser {
 /// 3. Calls `PeerList::insert_or_update` with the peer's pubkey.
 /// 4. The peer list will generate `DiscoveryEvent::PeerDiscovered` or `PeerUpdated` events.
 pub struct MdnsScanner {
+    #[allow(dead_code)] // Stored for potential future use (e.g., accessing peer list state)
     peer_list: Arc<Mutex<PeerList>>,
     service_daemon: mdns_sd::ServiceDaemon,
     receiver: Option<mdns_sd::Receiver<mdns_sd::ServiceEvent>>,
@@ -146,13 +153,14 @@ impl MdnsScanner {
     /// Returns `Ok(MdnsScanner)` on success, or `DiscoveryError` if browsing fails.
     pub fn start(peer_list: Arc<Mutex<PeerList>>) -> Result<Self, DiscoveryError> {
         // Create the mDNS service daemon
-        let daemon = mdns_sd::ServiceDaemon::new()
-            .map_err(|e| DiscoveryError::MdnsError(format!("Failed to create service daemon: {}", e)))?;
+        let daemon = mdns_sd::ServiceDaemon::new().map_err(|e| {
+            DiscoveryError::MdnsError(format!("Failed to create service daemon: {}", e))
+        })?;
 
         // Start browsing for services
-        let receiver = daemon
-            .browse(MDNS_SERVICE_TYPE)
-            .map_err(|e| DiscoveryError::ServiceBrowseError(format!("Failed to browse services: {}", e)))?;
+        let receiver = daemon.browse(MDNS_SERVICE_TYPE).map_err(|e| {
+            DiscoveryError::ServiceBrowseError(format!("Failed to browse services: {}", e))
+        })?;
 
         log::info!("mDNS scanner started, browsing for {}", MDNS_SERVICE_TYPE);
 
@@ -223,13 +231,13 @@ impl MdnsScanner {
         // Convert TxtProperty to &str for parsing - TxtProperty can be converted to string
         let txt_vec: Vec<String> = txt_props.iter().map(|tp| tp.to_string()).collect();
         let txt_strs: Vec<&str> = txt_vec.iter().map(|s| s.as_str()).collect();
-        
+
         // Parse pubkey from TXT records
         let pubkey = Self::parse_pubkey_from_txt(&txt_strs)?;
-        
+
         // Create PeerIdentity from the pubkey
         let identity = PeerIdentity::new(pubkey);
-        
+
         // Update peer list (signal strength is not available from mDNS, use 0 as default)
         let mut list = peer_list.lock().await;
         if let Some(_event) = list.insert_or_update(pubkey, 0) {
@@ -241,7 +249,7 @@ impl MdnsScanner {
             // The event is already generated by insert_or_update, but we could broadcast it here
             // if we had an event channel like BleScanner does
         }
-        
+
         Ok(())
     }
 
@@ -254,9 +262,13 @@ impl MdnsScanner {
         let pubkey_str = txt_props
             .iter()
             .find(|prop| prop.starts_with("pubkey="))
-            .ok_or_else(|| DiscoveryError::InvalidTxtRecord("Missing pubkey TXT record".to_string()))?
+            .ok_or_else(|| {
+                DiscoveryError::InvalidTxtRecord("Missing pubkey TXT record".to_string())
+            })?
             .strip_prefix("pubkey=")
-            .ok_or_else(|| DiscoveryError::InvalidTxtRecord("Malformed pubkey TXT record".to_string()))?;
+            .ok_or_else(|| {
+                DiscoveryError::InvalidTxtRecord("Malformed pubkey TXT record".to_string())
+            })?;
 
         // Parse hex string to bytes
         if pubkey_str.len() != 64 {
@@ -271,10 +283,12 @@ impl MdnsScanner {
             if i >= 32 {
                 break;
             }
-            let hex_byte = std::str::from_utf8(chunk)
-                .map_err(|e| DiscoveryError::InvalidTxtRecord(format!("Invalid hex string: {}", e)))?;
-            pubkey[i] = u8::from_str_radix(hex_byte, 16)
-                .map_err(|e| DiscoveryError::InvalidTxtRecord(format!("Invalid hex byte: {}", e)))?;
+            let hex_byte = std::str::from_utf8(chunk).map_err(|e| {
+                DiscoveryError::InvalidTxtRecord(format!("Invalid hex string: {}", e))
+            })?;
+            pubkey[i] = u8::from_str_radix(hex_byte, 16).map_err(|e| {
+                DiscoveryError::InvalidTxtRecord(format!("Invalid hex byte: {}", e))
+            })?;
         }
 
         Ok(pubkey)
@@ -288,13 +302,13 @@ impl MdnsScanner {
         if let Err(e) = self.service_daemon.stop_browse(MDNS_SERVICE_TYPE) {
             log::warn!("Failed to stop browsing: {}", e);
         }
-        
+
         // Shutdown the daemon
         let _ = self.service_daemon.shutdown();
-        
+
         // Drop the receiver to signal the background task to stop
         self.receiver.take();
-        
+
         log::debug!("mDNS scanner stopped");
     }
 }
@@ -315,11 +329,8 @@ mod tests {
     fn parse_pubkey_from_valid_txt() {
         let identity = PeerIdentity::new(pk(0xAB));
         let txt_pubkey = format!("pubkey={}", identity.display_id);
-        let txt_props = vec![
-            txt_pubkey.as_str(),
-            "is_relay=1",
-        ];
-        
+        let txt_props = vec![txt_pubkey.as_str(), "is_relay=1"];
+
         let parsed = MdnsScanner::parse_pubkey_from_txt(&txt_props).unwrap();
         assert_eq!(parsed, pk(0xAB));
     }
@@ -351,7 +362,7 @@ mod tests {
     fn advertiser_registers_service() {
         let identity = PeerIdentity::new(pk(0x42));
         let advertiser = MdnsAdvertiser::start(8080, identity, false);
-        
+
         // This test may fail if mDNS daemon cannot be created (e.g., in CI without network)
         // So we check if it's an error due to daemon creation vs other errors
         match advertiser {
@@ -374,7 +385,7 @@ mod tests {
     async fn scanner_starts_browsing() {
         let peer_list = Arc::new(Mutex::new(PeerList::new(300)));
         let scanner_result = MdnsScanner::start(peer_list);
-        
+
         // This test may fail if mDNS daemon cannot be created (e.g., in CI without network)
         match scanner_result {
             Ok(mut scanner) => {
