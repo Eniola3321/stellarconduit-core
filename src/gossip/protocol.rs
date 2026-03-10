@@ -6,16 +6,17 @@ use tokio::sync::Mutex;
 use tokio::time::sleep;
 
 use crate::discovery::peer_list::PeerList;
+use crate::gossip::queue::PriorityQueue;
 use crate::gossip::round::{GossipScheduler, ACTIVE_ROUND_INTERVAL_MS, IDLE_ROUND_INTERVAL_MS};
 use crate::gossip::strike_tracker::StrikeTracker;
 use crate::message::signing::verify_signature;
-use crate::message::types::{SyncRequest, SyncResponse, TransactionEnvelope};
+use crate::message::types::{ProtocolMessage, SyncRequest, SyncResponse, TransactionEnvelope};
 use crate::peer::identity::PeerIdentity;
 use crate::transport::unified::TransportManager;
 
 #[derive(Default)]
 pub struct GossipState {
-    pub active_envelopes: Vec<TransactionEnvelope>,
+    pub active_queue: PriorityQueue,
 }
 
 impl GossipState {
@@ -25,14 +26,14 @@ impl GossipState {
 
     /// Add an envelope to the active buffer
     pub fn add_envelope(&mut self, env: TransactionEnvelope) {
-        self.active_envelopes.push(env);
+        self.active_queue.push(ProtocolMessage::Transaction(env));
     }
 
     /// Generates a SyncRequest containing the 4-byte prefixes of known message IDs
     pub fn generate_sync_request(&self) -> SyncRequest {
         let known_message_ids = self
-            .active_envelopes
-            .iter()
+            .active_queue
+            .iter_envelopes()
             .map(|env| {
                 let mut prefix = [0u8; 4];
                 prefix.copy_from_slice(&env.message_id[0..4]);
@@ -47,8 +48,8 @@ impl GossipState {
     /// that the requestor does not have.
     pub fn handle_sync_request(&self, req: &SyncRequest) -> SyncResponse {
         let missing_envelopes = self
-            .active_envelopes
-            .iter()
+            .active_queue
+            .iter_envelopes()
             .filter(|env| {
                 let mut prefix = [0u8; 4];
                 prefix.copy_from_slice(&env.message_id[0..4]);
@@ -230,15 +231,23 @@ mod tests {
     #[test]
     fn test_handle_sync_response() {
         let mut state = GossipState::new();
-        assert_eq!(state.active_envelopes.len(), 0);
+        assert_eq!(state.active_queue.len(), 0);
 
         let resp = SyncResponse {
             missing_envelopes: vec![mock_envelope(0xCC)],
         };
 
         state.handle_sync_response(resp);
-        assert_eq!(state.active_envelopes.len(), 1);
-        assert_eq!(state.active_envelopes[0].message_id[0], 0xCC);
+        assert_eq!(state.active_queue.len(), 1);
+        assert_eq!(
+            state
+                .active_queue
+                .iter_envelopes()
+                .next()
+                .unwrap()
+                .message_id[0],
+            0xCC
+        );
     }
 
     #[tokio::test]
